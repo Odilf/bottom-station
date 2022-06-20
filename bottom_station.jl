@@ -33,6 +33,9 @@ md"""
 Culo analizer in Julia
 """
 
+# ╔═╡ deda297d-cee7-4bbd-841a-fdd6319db63a
+Hand = Vector{<:Integer}
+
 # ╔═╡ dea1319f-79b7-41d4-b486-fc75c57a1406
 TableOfContents()
 
@@ -63,7 +66,7 @@ create_deck()
 
 # ╔═╡ 46d05c1c-4d8f-431f-9e45-c93ae4ec0752
 struct Player
-	hand::Vector{Integer}
+	hand::Hand
 	strategy::Function
 end
 
@@ -71,7 +74,7 @@ end
 function create_players(strategies::Vector{<:Strategy})
 	n = length(strategies)
 	deck = shuffle(rng, create_deck())
-	players = [Player([], strategy) for strategy in strategies]
+	players = [Player(Int[], strategy) for strategy in strategies]
 
 	i = 1
 	while length(deck) > 0
@@ -130,12 +133,27 @@ end
 # ╔═╡ 4c909a49-4d12-4c87-b46f-c853cf4942bf
 function play_game(players::Vector{Player})
 	players = deepcopy(players)
+
+	skipped = []
 	top = nothing
 	turn = 0
 	winner = nothing
-	
+
 	while isnothing(winner)
-		players, top, turn, winner = play(players, turn, top)
+		# check for skipped players
+		if length(players) == length(skipped) - 1
+			top = nothing
+		end
+		
+		players, new_top, turn, winner = play(players, turn, top)
+
+		# skip player if can't play
+		if isnothing(new_top)
+			push!(skipped, turn % length(players) + 1)
+			continue
+		end
+
+		top = new_top
 	end
 	
 	return turn, winner.strategy, players, top
@@ -144,6 +162,10 @@ end
 # ╔═╡ 8d308efd-35dc-46f6-ab66-149e9e86adc2
 md"""
 # Strategies
+
+Strategies are funcitons that take a hand and a top (which can be `nothing`) and return a `top` and a `hand`. 
+
+If you can't play, you return `nothing` as the top.
 """
 
 # ╔═╡ b58a6595-a146-4550-a795-5d9787a109e2
@@ -154,7 +176,7 @@ Like `first_card` for just getting the smallest first available card
 """
 
 # ╔═╡ def329b2-49b0-447b-a733-64630f5ccf1a
-function first_card(hand::Vector{<:Integer})
+function first_card(hand::Hand)
 	rank = hand[1]
 	size = count(i -> i == rank, hand)
 	top = Clump(rank, size)
@@ -171,13 +193,17 @@ Just take out the least valued cards, disregarding pairs and such
 """
 
 # ╔═╡ 1c31f296-6796-4156-8f25-b40981d99b96
-function min(hand::Vector{<:Integer}, top::Clump)
+function min(hand::Hand, top::Clump)
 	counts = [i => count(j -> j == i, hand) for i in unique(hand)]
 	valids = filter(i -> i.second >= top.size && i.first >= top.rank, counts)
 	if isempty(valids)
 		return nothing, hand
 	end
 	rank = valids[1].first
+
+	if rank == 69
+		return nothing, hand
+	end
 
 	# delete cards from hand
 	index = findfirst(card -> card == rank, hand)
@@ -186,7 +212,7 @@ function min(hand::Vector{<:Integer}, top::Clump)
 end
 
 # ╔═╡ e4b867af-c5e9-4668-adf7-51cb2fa9ebf7
-function min(hand::Vector{<:Integer}, top::Nothing)
+function min(hand::Hand, top::Nothing)
 	first_card(hand)
 end
 
@@ -201,9 +227,9 @@ Only play if your match is exact
 """
 
 # ╔═╡ 757c4003-f9ce-4397-bb11-ae4dfc17390f
-function exact(hand::Vector{<:Integer}, top::Clump)
+function exact(hand::Hand, top::Clump)
 	counts = [i => count(j -> j == i, hand) for i in unique(hand)]
-	valids = filter(i -> i.second == top.size && i.first == top.rank, counts)
+	valids = filter(i -> i.second == top.size && i.first >= top.rank, counts)
 	if isempty(valids)
 		return nothing, hand
 	end
@@ -216,7 +242,7 @@ function exact(hand::Vector{<:Integer}, top::Clump)
 end
 
 # ╔═╡ edd2a120-38bf-4394-ad73-14979a82c270
-function exact(hand::Vector{<:Integer}, top::Nothing)
+function exact(hand::Hand, top::Nothing)
 	rank = hand[1]
 	size = count(i -> i == rank, hand)
 	top = Clump(rank, size)
@@ -233,8 +259,62 @@ md"""
 Use only as last resort
 """
 
-# ╔═╡ 53d6c1a5-0c8f-4fb7-909b-a0b2d929b55d
+# ╔═╡ de4cc223-e74f-461c-94cc-c79649de11d3
+min([1, 2, 3, 4], Clump(1, 1))
 
+# ╔═╡ c18af8c0-b41a-4d5c-bb92-fec7d759b5c1
+function least_wildcard(hand::Hand, top::Clump)
+	wildcard_amount = count(i -> i == 69, hand)
+	if wildcard_amount == 0
+		return nothing, hand
+	end
+
+	use = 1
+	new_top = nothing
+	while use <= wildcard_amount
+		if top.size == use
+			new_top = Clump(69, top.size)
+		end
+		
+		if top.size - use == 0
+			new_top = Clump(69, use)
+			break
+		end
+
+		
+		new_top, hand = min(hand, Clump(top.rank, top.size - use))
+
+		if !isnothing(new_top)
+			break
+		end
+
+		use += 1
+	end
+
+	index = findfirst(card -> card == 69, hand)
+	deleteat!(hand, index:(index + use - 1))
+
+	Clump(new_top.rank, top.size), hand 
+end
+
+# ╔═╡ 958638bb-aa95-4ab7-88da-615f2f25e4f7
+least_wildcard([2, 2, 3, 3, 69, 69], Clump(2, 3))
+
+# ╔═╡ 53d6c1a5-0c8f-4fb7-909b-a0b2d929b55d
+function exact_wildcard(hand::Hand, top::Clump)
+	new_top, hand = exact(hand, top)
+	
+	if isnothing(top)
+		least_wildcard(hand, top)
+	else
+		new_top, hand
+	end
+end
+
+# ╔═╡ 204d5c1d-3d9f-4a27-88a2-d4954d354869
+function exact_wildcard(hand::Hand, top::Nothing)
+	exact(hand, top)
+end
 
 # ╔═╡ 6dae5c4e-c3db-480b-b39f-e1050933cc76
 md"""
@@ -242,7 +322,7 @@ md"""
 """
 
 # ╔═╡ a2381de5-db3b-40b8-b67b-f8dce03bf6e6
-possible_strategies = [min, exact]
+possible_strategies = [exact_wildcard, min, exact]
 
 # ╔═╡ 46edd306-c3ff-475d-9436-8e5056135446
 md"""
@@ -255,15 +335,30 @@ md"""
 That helps get useful stats
 """
 
+# ╔═╡ e377f956-4199-4f2e-bf87-5237f30d9dfd
+function score(hand::Hand)
+	sum(hand)
+end
+
 # ╔═╡ a133a1fc-e234-4878-93d2-a107efc3c873
 function score(player::Player)
-	sum(player.hand)
+	score(player.hand)
+end
+
+# ╔═╡ 2d459f65-cfea-47c9-8d28-ba64892724eb
+function twos(hand::Hand)
+	count(i -> i == get_value(2), hand)
+end
+
+# ╔═╡ 64918cb1-a308-4fd4-b973-7b158d69c5d2
+function ones(hand::Hand)
+	count(i -> i == get_value(1), hand)
 end
 
 # ╔═╡ fa7e9bc3-6136-46e5-ad19-a734b83ae5ff
 function getstats(strategies::Vector{<:Function})
 	players = create_players(strategies)
-	scores = [score(player) for player in players]
+	hands = [player.hand for player in players]
 	
 	turn, strategy, players, top = play_game(players)
 
@@ -273,8 +368,7 @@ function getstats(strategies::Vector{<:Function})
 		winner = winner,
 		strategy = strategy,
 		total_turns = turn,
-		winner_score = scores[winner],
-		average_score = mean(scores)
+		hands = hands,
 	)
 end
 
@@ -293,8 +387,27 @@ plotly()
 # ╔═╡ 2d4c3232-75e1-4f84-8e27-5628ccf5ff69
 @bind s4 Select(possible_strategies; default="min")
 
+# ╔═╡ 7d287361-bf0e-4147-b4dc-56243e53f672
+strategies = [s1, s2, s3, s4]
+
 # ╔═╡ db2f00da-897b-4825-8bbe-debca06ac11e
 data = [getstats(strategies) for i in 1:sample_size]
+
+# ╔═╡ 04361258-75da-4c5f-b375-23f9da5b647b
+let
+	winners = [datum.winner for datum in data]
+	data = [(j, count(i -> i == j, winners) / length(winners)) for j in unique(winners)]
+	data = sort(data)
+
+	canvas = plot(; xticks=1:10)
+	for datum in data
+		plot!(datum;
+			st=:bar, 
+			label=strategies[datum[1]], 
+		)
+	end
+	canvas
+end
 
 # ╔═╡ b98b439f-48b8-4a1f-8759-e334017cddc8
 md"""
@@ -1262,6 +1375,7 @@ version = "0.9.1+5"
 
 # ╔═╡ Cell order:
 # ╟─891e2232-67b3-47ac-b83f-04116b0a5ec1
+# ╠═deda297d-cee7-4bbd-841a-fdd6319db63a
 # ╠═d902deba-d7a9-474f-88c9-99635917ad16
 # ╠═dea1319f-79b7-41d4-b486-fc75c57a1406
 # ╠═0450834e-f08c-11ec-22f8-3baafe34f9ce
@@ -1286,13 +1400,20 @@ version = "0.9.1+5"
 # ╠═757c4003-f9ce-4397-bb11-ae4dfc17390f
 # ╠═edd2a120-38bf-4394-ad73-14979a82c270
 # ╟─1b6b7d13-a994-4c81-b7e4-1e655c7871cf
+# ╠═de4cc223-e74f-461c-94cc-c79649de11d3
+# ╠═c18af8c0-b41a-4d5c-bb92-fec7d759b5c1
+# ╠═958638bb-aa95-4ab7-88da-615f2f25e4f7
 # ╠═53d6c1a5-0c8f-4fb7-909b-a0b2d929b55d
+# ╠═204d5c1d-3d9f-4a27-88a2-d4954d354869
 # ╟─6dae5c4e-c3db-480b-b39f-e1050933cc76
 # ╠═a2381de5-db3b-40b8-b67b-f8dce03bf6e6
 # ╟─46edd306-c3ff-475d-9436-8e5056135446
 # ╟─ec509a45-bcd6-4e9d-b15f-c04ea92de4b0
 # ╠═7acd693b-9a84-4047-aea2-b812138ce149
+# ╠═e377f956-4199-4f2e-bf87-5237f30d9dfd
 # ╠═a133a1fc-e234-4878-93d2-a107efc3c873
+# ╠═2d459f65-cfea-47c9-8d28-ba64892724eb
+# ╠═64918cb1-a308-4fd4-b973-7b158d69c5d2
 # ╠═fa7e9bc3-6136-46e5-ad19-a734b83ae5ff
 # ╠═c31304ec-00ee-4d6d-bc5c-db90bd8e2a65
 # ╟─375c1322-7284-483e-a93a-86926d60dc4f
@@ -1300,7 +1421,9 @@ version = "0.9.1+5"
 # ╟─e0485442-420c-4a8a-9e08-d38109e5daf5
 # ╟─9069ba5a-4d31-4a80-9048-085c1beac6e6
 # ╟─2d4c3232-75e1-4f84-8e27-5628ccf5ff69
+# ╟─7d287361-bf0e-4147-b4dc-56243e53f672
 # ╠═db2f00da-897b-4825-8bbe-debca06ac11e
+# ╟─04361258-75da-4c5f-b375-23f9da5b647b
 # ╟─b98b439f-48b8-4a1f-8759-e334017cddc8
 # ╠═bb4b666e-f621-4641-8956-ccb6e05ec3f6
 # ╟─00000000-0000-0000-0000-000000000001
